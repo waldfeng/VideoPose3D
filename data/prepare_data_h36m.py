@@ -24,9 +24,6 @@ output_filename_2d = 'data_2d_h36m_gt'
 subjects = ['S1', 'S5', 'S6', 'S7', 'S8', 'S9', 'S11']
 
 if __name__ == '__main__':
-    if os.path.basename(os.getcwd()) != 'data':
-        print('This script must be launched from the "data" directory')
-        exit(0)
         
     parser = argparse.ArgumentParser(description='Human3.6M dataset downloader/converter')
     
@@ -41,14 +38,12 @@ if __name__ == '__main__':
     # This option does not require MATLAB, but the Python library cdflib must be installed
     parser.add_argument('--from-source-cdf', default='', type=str, metavar='PATH', help='convert original dataset')
     
+    parser.add_argument('--from-source-json', default='', type=str, metavar='PATH', help='convert original dataset')
+    
     args = parser.parse_args()
     
     if args.from_archive and args.from_source:
         print('Please specify only one argument')
-        exit(0)
-    
-    if os.path.exists(output_filename + '.npz'):
-        print('The dataset already exists at', output_filename + '.npz')
         exit(0)
         
     if args.from_archive:
@@ -140,6 +135,47 @@ if __name__ == '__main__':
         np.savez_compressed(output_filename, positions_3d=output)
         
         print('Done.')
+    
+    #convert landmarker from json format
+    elif args.from_source_json:
+        print('Converting original Human3.6M dataset from', args.from_source_json, '(Jason files)')
+        output = {}
+        
+        import json
+
+        for subject in subjects:
+            output[subject] = {}
+            #opening json files
+            json_data =     json.load( open(args.from_source_json + '/Human36M_subject' + subject[1:] + '_data.json') );
+            json_joint_3d = json.load( open(args.from_source_json + '/Human36M_subject' + subject[1:] + '_joint_3d.json') );   
+
+            #map action_name to action_idx
+            action_idx_name={}
+            for json_data_itr in json_data['images']:
+                if( str(json_data_itr['action_idx']) not in action_idx_name ):
+                    action_name = json_data_itr['action_name'];
+                    action_name.replace('TakingPhoto', 'Photo').replace('WalkingDog', 'WalkDog')
+                    action_idx_name[str(json_data_itr['action_idx'])] = action_name;
+            
+            #sort and reshape the joint_3d data
+            for (action_idx,action_joint_3d) in json_joint_3d.items():
+                action_joint_3d_data = []
+                #sort sub_action_value with keys
+                sub_action_keys_sorted =  sorted(action_joint_3d.keys())
+                for sub_action_key in sub_action_keys_sorted:
+                    sub_action_value = action_joint_3d[sub_action_key]
+                    frame_keys_sorted = sorted(sub_action_value.keys())
+                    for frame_key in frame_keys_sorted:
+                        frame_value = sub_action_value[frame_key]
+                        action_joint_3d_data.append(frame_value)
+
+                action_joint_3d_data = np.array( action_joint_3d_data )
+                action_joint_3d_data /= 1000.0 # Meters instead of millimeters
+
+                output[subject][action_idx_name[action_idx]] = action_joint_3d_data.astype('float32');
+        
+        print('Saving...')
+        np.savez_compressed(args.from_source_json+"/"+output_filename, positions_3d=output)
             
     else:
         print('Please specify the dataset source')
@@ -148,7 +184,7 @@ if __name__ == '__main__':
     # Create 2D pose file
     print('')
     print('Computing ground-truth 2D poses...')
-    dataset = Human36mDataset(output_filename + '.npz')
+    dataset = Human36mDataset(args.from_source_json+"/"+output_filename + '.npz')
     output_2d_poses = {}
     for subject in dataset.subjects():
         output_2d_poses[subject] = {}
@@ -168,6 +204,6 @@ if __name__ == '__main__':
         'num_joints': dataset.skeleton().num_joints(),
         'keypoints_symmetry': [dataset.skeleton().joints_left(), dataset.skeleton().joints_right()]
     }
-    np.savez_compressed(output_filename_2d, positions_2d=output_2d_poses, metadata=metadata)
+    np.savez_compressed(args.from_source_json+"/"+output_filename_2d, positions_2d=output_2d_poses, metadata=metadata)
     
     print('Done.')

@@ -15,14 +15,14 @@ def normalize_screen_coordinates(X, w, h):
     assert X.shape[-1] == 2
     
     # Normalize so that [0, w] is mapped to [-1, 1], while preserving the aspect ratio
-    return X/w*2 - [1, h/w]
+    return X/w*2 - [1, h/w] # means normalization ( X -[w,h]/2 ) /(cam['rew_w']/2), move the image center from [w,h]/2 to center self defined
 
     
 def image_coordinates(X, w, h):
     assert X.shape[-1] == 2
     
     # Reverse camera frame normalization
-    return (X + [1, h/w])*w/2
+    return (X + [1, h/w])*w/2 # means transmit image_coordinate to pixel_coordinate
     
 
 def world_to_camera(X, R, t):
@@ -56,7 +56,7 @@ def project_to_2d(X, camera_params):
     k = camera_params[..., 4:7]
     p = camera_params[..., 7:]
     
-    XX = torch.clamp(X[..., :2] / X[..., 2:], min=-1, max=1)
+    XX = torch.clamp(X[..., :2] / X[..., 2:], min=-1, max=1) # z axis normalization
     r2 = torch.sum(XX[..., :2]**2, dim=len(XX.shape)-1, keepdim=True)
 
     radial = 1 + torch.sum(k * torch.cat((r2, r2**2, r2**3), dim=len(r2.shape)-1), dim=len(r2.shape)-1, keepdim=True)

@@ -7,9 +7,11 @@
 
 import numpy as np
 import copy
+from glob import glob
 from common.skeleton import Skeleton
 from common.mocap_dataset import MocapDataset
 from common.camera import normalize_screen_coordinates, image_coordinates
+from common.quaternion import rotmat2q
        
 h36m_skeleton = Skeleton(parents=[-1,  0,  1,  2,  3,  4,  0,  6,  7,  8,  9,  0, 11, 12, 13, 14, 12,
        16, 17, 18, 19, 20, 19, 22, 12, 24, 25, 26, 27, 28, 27, 30],
@@ -210,6 +212,9 @@ class Human36mDataset(MocapDataset):
     def __init__(self, path, remove_static_joints=True):
         super().__init__(fps=50, skeleton=h36m_skeleton)
         
+        #generate h36m cameras extrinsic and intrinsic params
+        h36m_cameras_intrinsic_params, h36m_cameras_extrinsic_params= self.gen_h36m_params('/media/fcz/work/work/skeleton_detection/dataset/human36m/json/annotations/')
+
         self._cameras = copy.deepcopy(h36m_cameras_extrinsic_params)
         for cameras in self._cameras.values():
             for i, cam in enumerate(cameras):
@@ -220,7 +225,7 @@ class Human36mDataset(MocapDataset):
                 
                 # Normalize camera frame
                 cam['center'] = normalize_screen_coordinates(cam['center'], w=cam['res_w'], h=cam['res_h']).astype('float32')
-                cam['focal_length'] = cam['focal_length']/cam['res_w']*2
+                cam['focal_length'] = cam['focal_length']/cam['res_w']*2  # cam['res_w']/2 normalization
                 if 'translation' in cam:
                     cam['translation'] = cam['translation']/1000 # mm to meters
                 
@@ -234,6 +239,7 @@ class Human36mDataset(MocapDataset):
         data = np.load(path, allow_pickle=True)['positions_3d'].item()
         
         self._data = {}
+        _data_joints_num = 0;
         for subject, actions in data.items():
             self._data[subject] = {}
             for action_name, positions in actions.items():
@@ -241,10 +247,12 @@ class Human36mDataset(MocapDataset):
                     'positions': positions,
                     'cameras': self._cameras[subject],
                 }
+                _data_joints_num = positions.shape[1];
                 
         if remove_static_joints:
             # Bring the skeleton to 17 joints instead of the original 32
-            self.remove_joints([4, 5, 9, 10, 11, 16, 20, 21, 22, 23, 24, 28, 29, 30, 31])
+            if _data_joints_num == 32:
+                self.remove_joints([4, 5, 9, 10, 11, 16, 20, 21, 22, 23, 24, 28, 29, 30, 31])
             
             # Rewire shoulders to the correct parents
             self._skeleton._parents[11] = 8
@@ -252,4 +260,30 @@ class Human36mDataset(MocapDataset):
             
     def supports_semi_supervised(self):
         return True
-   
+
+    def gen_h36m_params( self, camera_files_path ):
+        h36m_cameras_intrinsic_params_new = h36m_cameras_intrinsic_params;
+        camera_num = len( h36m_cameras_intrinsic_params_new );
+        for index in range( camera_num ):
+            h36m_cameras_intrinsic_params_new[index]['id'] = str(index+1)
+            h36m_cameras_intrinsic_params_new[index]['radial_distortion'] = [0,0,0]
+            h36m_cameras_intrinsic_params_new[index]['tangential_distortion'] = [0,0]
+
+        h36m_cameras_extrinsic_params_new = {}
+
+        files_path = glob(camera_files_path+r'*_camera.json')
+        import json
+        for file_path in files_path:
+            action_index_str = 'S' + file_path[file_path.index( 'Human36M_subject' )+16:file_path.index( '_camera' )]
+            camera_json = json.load( open( file_path ) );
+            #get extin params
+            h36m_cameras_extrinsic_param_new = []
+            for index in range( camera_num ):
+                h36m_cameras_extrinsic_param_new_camera={}
+                h36m_cameras_extrinsic_param_new_camera['orientation'] = rotmat2q( camera_json[str(index+1)]['R'] )
+                h36m_cameras_extrinsic_param_new_camera['translation'] = camera_json[str(index+1)]['t']
+                h36m_cameras_extrinsic_param_new.append( h36m_cameras_extrinsic_param_new_camera)
+
+            h36m_cameras_extrinsic_params_new[action_index_str] = h36m_cameras_extrinsic_param_new;
+
+        return  h36m_cameras_intrinsic_params_new,h36m_cameras_extrinsic_params_new
